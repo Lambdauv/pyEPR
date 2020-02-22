@@ -18,6 +18,7 @@ from __future__ import (division, print_function)
 import atexit
 import os
 import re
+import io
 import signal
 import tempfile
 import time
@@ -1006,7 +1007,7 @@ class HfssSetup(HfssPropertyObject):
         # Parse file
         text2 = text.split(r'==================')
         if len(text) >= 3:
-            df = pd.read_csv(pd.compat.StringIO(
+            df = pd.read_csv(io.StringIO(
                 text2[3].strip()), sep='|', skipinitialspace=True, index_col=0)
             df = df.drop('Unnamed: 3', 1)
         else:

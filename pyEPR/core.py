@@ -19,6 +19,7 @@ import shutil
 import warnings
 import numpy as np
 import pandas as pd
+import datetime as dt
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
@@ -292,7 +293,7 @@ class Project_Info(object):
         '''
         return self.design, oDesign.modeler
 
-    def get_all_variables_names(self):
+    def get_all_variable_names(self):
         """Returns array of all project and local design names."""
         return self.project.get_variable_names() + self.design.get_variable_names()
 
@@ -309,8 +310,11 @@ class Project_Info(object):
         the junction if you change it.
         """
 
-        all_variables_names = self.get_all_variables_names()
+        all_variables_names = self.get_all_variable_names()
         all_object_names    = self.get_all_object_names()
+
+        if self.junctions.items() is None:
+            print('No junctions specified!')
 
         for jjnm, jj in self.junctions.items():
 
@@ -327,6 +331,8 @@ class Project_Info(object):
                     Seems like for junction `%s` you specified a %s that does not exist
                     in HFSS by the name: `%s` """ % (jjnm, name, jj[name])
 
+        print('Successfully validated junctions!')
+
         #TODO: Check the length of the rectnagle
 
 
@@ -340,7 +346,7 @@ class pyEPR_HFSSAnalysis(object):
     Further, it allows one to calcualte dissipation, etc
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, project_info, data_dir=None):
         '''
         Parameters:
         -------------------
@@ -350,16 +356,6 @@ class pyEPR_HFSSAnalysis(object):
         Example use:
         -------------------
         '''
-        if (len(args) == 1) and (args[0].__class__.__name__ == 'Project_Info'):
-            #isinstance(args[0], Project_Info): # fails on module repload with changes
-            project_info = args[0]
-        else:
-            assert len(args) == 0, '''Since you did not pass a Project_info object
-                as a arguemnt, we now assuem you are trying to create a project
-                info object here by apassing its arguments. See Project_Info.
-                It does not take any arguments, only kwargs. \N{face with medical mask}'''
-            project_info = Project_Info(*args, **kwargs)
-
 
         # Input
         self.pinfo = project_info
@@ -393,10 +389,15 @@ class pyEPR_HFSSAnalysis(object):
             print('\t%-15s %d\n\t%-15s %d' %('# eigenmodes', self.nmodes, \
                   '# variations', self.nvariations))
 
+        if data_dir is None:
+            data_dir = os.getcwd()
+            data_dir = os.path.join(data_dir, 'data')
+            warnings.warn('[pyEPR]: No data directory specified, setting data_dir to %s' %(data_dir))
+
         # Setup data saving
         self.data_dir = None
         self.file_name = None
-        self.setup_data()
+        self.setup_data(data_dir)
 
     @property
     def setup(self):
@@ -430,7 +431,7 @@ class pyEPR_HFSSAnalysis(object):
     def options(self):
         return self.pinfo.options
 
-    def setup_data(self):
+    def setup_data(self, data_dir):
         '''
         Set up folder paths for saving data to.
 
@@ -442,9 +443,8 @@ class pyEPR_HFSSAnalysis(object):
         if len(self.design.name) > 50:
             logger.error('WARNING!   DESIGN FILENAME MAY BE TOO LONG! ')
 
-        self.data_dir = Path(config.root_dir) / self.project.name / self.design.name
-        self.data_filename = self.data_dir / (time.strftime(config.save_format, \
-            time.localtime()) + '.npz')
+        self.data_dir = Path(data_dir) / self.project.name / self.design.name
+        self.data_filename = self.data_dir / (dt.datetime.now().strftime('%Y-%m-%dT%H-%M-%S') + '.npz')
 
         if not self.data_dir.is_dir():
             self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -884,11 +884,11 @@ class pyEPR_HFSSAnalysis(object):
             logger.debug(f'Calculating participation for {(junc_nm, junc)}')
 
             # Get peak current though junction I_peak
-            if self.pinfo.options.method_calc_P_mj is 'J_surf_mag':
+            if self.pinfo.options.method_calc_P_mj == 'J_surf_mag':
                 I_peak = self.calc_avg_current_J_surf_mag(
                     variation, junc['rect'], junc['line'])
 
-            elif self.pinfo.options.method_calc_P_mj is 'line_voltage':
+            elif self.pinfo.options.method_calc_P_mj == 'line_voltage':
                 I_peak = self.calc_current_line_voltage(
                     variation, junc['line'], Ljs[junc_nm])
 
@@ -978,7 +978,7 @@ class pyEPR_HFSSAnalysis(object):
             self.lv = self.get_lv(variation)
             time.sleep(0.4)
 
-            if self.has_fields() == False:
+            if self.has_fields() is False:
                 logger.error(f" Error: HFSS does not have field solution for mode={ii}.\
                                 Skipping this mode in the analysis")
                 continue
@@ -1071,7 +1071,7 @@ class pyEPR_HFSSAnalysis(object):
 
                 # get Q surface
                 if self.pinfo.dissipative.resistive_surfaces :
-                    if self.pinfo.dissipative.resistive_surfaces is 'all':
+                    if self.pinfo.dissipative.resistive_surfaces == 'all':
                         sol = sol.append(
                             self.get_Qsurface_all(mode, variation))
                     else:
@@ -1538,7 +1538,7 @@ class Results_Hamiltonian(OrderedDict):
         res = OrderedDict()
         variations = variations or self.keys()
         for key in variations:  # variation
-            if vs is 'variation':
+            if vs == 'variation':
                 res[key] = self[key][quantity]
             else:
                 res[str(ureg.Quantity(self[key]['hfss_variables']['_'+vs]).magnitude
@@ -1602,10 +1602,16 @@ class pyEPR_Analysis(object):
             # Contain everything: project_info and results
             self.data = Dict(pickle.load(handle))
 
+        for key in self.data.results.keys():
+            if not self.data.results[key]:
+                print('Removing empty key %s'%(str(key)))
+                # Weird behavior, doesn't delete if results is access as attribute
+                del self.data['results'][key]
+
         # Reverse from variations on outside to on inside
         results = pyEPR_HFSSAnalysis.results_variations_on_inside(self.data.results)
 
-        # Convinience functions
+        # Convenience functions
         self.variations     = variations or list(self.data.results.keys())
         self.hfss_variables = results['hfss_variables']
         self.freqs_hfss     = results['freqs_hfss_GHz']
@@ -1620,7 +1626,7 @@ class pyEPR_Analysis(object):
         self.convergence    = results['convergence']
         self.convergence_f_pass = results['convergence_f_pass']
 
-        self.nmodes               = self.sols[self.variations[0]].shape[0]
+        self.nmodes               = self.sols[self.variations[-1]].shape[0]
         self._renorm_pj           = config.epr.renorm_pj
 
         # Unique variation params -- make a get function
@@ -2009,6 +2015,24 @@ class pyEPR_Analysis(object):
     def plot_results(self, result, Y_label, variable, X_label, variations:list=None):
         #TODO?
         pass
+
+
+
+    # def get_fplot_data(self, sweep_variable: str = 'variation', variations: list = None, fig=None, x_label: str = None):
+
+    #     x_label = x_label or sweep_variable
+
+    #     f0 = self.results.get_frequencies_HFSS(variations=variations, vs=sweep_variable)
+    #     f1 = self.results.get_frequencies_O1(variations=variations, vs=sweep_variable)
+    #     f_ND = self.results.get_frequencies_ND(variations=variations, vs=sweep_variable)
+
+    #     mode_idx = list(f1.index)
+    #     nmodes = len(mode_idx)
+    #     cmap = cmap_discrete(nmodes)
+
+    #     return f0, f1, f_ND
+
+
 
     def plot_Hresults(self,
                       sweep_variable: str = 'variation',
