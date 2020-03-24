@@ -1,6 +1,11 @@
 pyEPR.calcs package
 ===================
 
+.. automodule:: pyEPR.calcs
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Submodules
 ----------
 
@@ -12,11 +17,3 @@ Submodules
    pyEPR.calcs.convert
    pyEPR.calcs.hamiltonian
    pyEPR.calcs.transmon
-
-Module contents
----------------
-
-.. automodule:: pyEPR.calcs
-   :members:
-   :undoc-members:
-   :show-inheritance:

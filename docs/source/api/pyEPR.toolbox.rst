@@ -1,6 +1,11 @@
 pyEPR.toolbox package
 =====================
 
+.. automodule:: pyEPR.toolbox
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Submodules
 ----------
 
@@ -8,11 +13,3 @@ Submodules
 
    pyEPR.toolbox.plotting
    pyEPR.toolbox.pythonic
-
-Module contents
----------------
-
-.. automodule:: pyEPR.toolbox
-   :members:
-   :undoc-members:
-   :show-inheritance:

@@ -9,6 +9,7 @@ import platform         # Which OS we run
 import numpy as np
 import pandas as pd
 import warnings
+import matplotlib.pyplot as plt
 
 # Constants
 from collections import OrderedDict
@@ -66,11 +67,96 @@ def get_above_diagonal(M):
     return M[np.triu_indices(M.shape[0], k=1)]
 
 
+def df_find_index(s: pd.Series, find, degree=2, ax=False):
+    """
+    Given a Pandas Series such as of freq with index Lj,
+    find the Lj that would give the right frequency
+    """
+    max_ = max(s.index.values)
+    min_ = min(s.index.values)
+    if find <= max_ and find >= min_:
+        # interpolate
+        z = pd.Series(list(s.index.values)+[np.NaN], index=list(s) + [find])
+        z = z.sort_index()
+        z = z.interpolate()
+        return z[find], z
+    else:
+        print('extrapolating')
+        z = pd.Series(list(s.index.values), index=list(s))
+        p = df_extrapolate(z, degree=degree, ax=False)
+        value = p(find)
+        return value, p
+
+
+def df_interpolate_value(s: pd.Series, find, ax=False, method='index'):
+    """
+    Given a Pandas Series such as of freq with index Lj,
+    find the freq that would correspnd to Lj given a value not in the index
+    """
+    z = pd.Series(list(s) + [np.NaN], index=list(s.index.values)+[find])
+    z = z.sort_index()
+    z = z.interpolate(method=method)
+    return z[find], z
+
+
+def df_extrapolate(s, degree=2, ax=False, rng_scale=2.):
+    """
+    For a pandas series
+
+    Returns np.poly1d
+    """
+    z = np.polyfit(s.index.values, s.values, degree)
+    p = np.poly1d(z)
+
+    if ax:
+        if ax is True:
+            ax = plt.gca()
+
+        max_ = max(s.index.values)
+        min_ = min(s.index.values)
+        rng = max_ - min_
+        xp = np.linspace(min_-rng_scale*rng, max_+rng_scale*rng, 100)
+        ys = p(xp)
+        ax.plot(xp, ys)
+        s.plot(marker='o', ax=ax)
+
+    return p
+
+
+def df_regress_value(s: pd.Series, index, degree=2, ax=False, method='index',
+                     rng_scale=2.):
+    """
+    for pandas series.
+    calls either  df_interpolate_value or df_extrapolate
+    """
+    max_ = max(s.index.values)
+    min_ = min(s.index.values)
+    if index > max_ or index < min_:
+        # print('extrapolate')
+        p = df_extrapolate(s, degree=degree, ax=ax, rng_scale=rng_scale)
+        value = p(index)
+    else:
+        value = df_interpolate_value(s, index, method=method)[0]
+    return value
+
+
+def series_of_1D_dict_to_multi_df(Uj_ind: pd.Series):
+    df = pd.DataFrame(dict([(k, v) for k, v in Uj_ind.items()])).transpose()
+    df.index.set_names(Uj_ind.index.names, inplace=True)
+    return df
+
+
 def sort_df_col(df):
     '''         sort by numerical int order    '''
+    return df.sort_index(axis=1)
+
+    # Buggy code, deosnt handles ints as inputs or floats as inpts
     col_names = df.columns
     if np.all(col_names.map(isint)):
         return df[col_names.astype(int).sort_values().astype(str)]
+    elif np.all(col_names.map(isfloat)):
+        # raises error in some cases
+        return df[col_names.astype(float).sort_values().astype(str)]
     else:
         return df
 
@@ -80,6 +166,8 @@ def sort_Series_idx(sr):
     idx_names = sr.index
     if np.all(idx_names.map(isint)):
         return sr[idx_names.astype(int).sort_values().astype(str)]
+    if np.all(idx_names.map(isfloat)):
+        return sr[idx_names.astype(float).sort_values().astype(str)]
     else:
         return sr
 
@@ -108,6 +196,7 @@ def deprecated(func):
     newFunc.__doc__ = func.__doc__
     newFunc.__dict__.update(func.__dict__)
     return newFunc
+
 
 def info_str_platform():
     return '''
@@ -291,7 +380,7 @@ def robust_percentile(calc_data, ROBUST_PERCENTILE=2.):
 
 
 __all__ = ['fact', 'nck', 'combinekw',
-           'divide_diagonal_by_2',
+           'divide_diagonal_by_2', 'df_find_index',
            'sort_df_col', 'sort_Series_idx',
            'print_matrix', 'print_NoNewLine',
            'DataFrame_col_diff', 'xarray_unravel_levels', 'robust_percentile']

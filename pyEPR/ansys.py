@@ -15,6 +15,8 @@ Purpose:
 # Python 2.7 and 3 compatibility
 from __future__ import (division, print_function)
 
+from typing import List
+
 import atexit
 import os
 import re
@@ -581,7 +583,7 @@ class HfssDesign(COMWrapper):
         self._modeler = design.SetActiveEditor("3D Modeler")
         self._optimetrics = design.GetModule("Optimetrics")
         self._mesh = design.GetModule("MeshSetup")
-        self.modeler = HfssModeler(self, self._modeler,\
+        self.modeler = HfssModeler(self, self._modeler,
                                    self._boundaries, self._mesh)
         self.optimetrics = Optimetrics(self)
 
@@ -687,6 +689,11 @@ class HfssDesign(COMWrapper):
         self._design.DeleteFullVariation("All", False)
 
     def get_nominal_variation(self):
+        """
+        Use: Gets the nominal variation string
+        Return Value: Returns a string representing the nominal variation
+        Returns string such as "Height='0.06mm' Lj='13.5nH'"
+        """
         return self._design.GetNominalVariation()
 
     def create_variable(self, name, value, postprocessing=False):
@@ -705,7 +712,72 @@ class HfssDesign(COMWrapper):
                 "UserDef:=", True,
                 "Value:=", value]]]])
 
-    def set_variable(self, name:str, value:str, postprocessing=False):
+    def _variation_string_to_variable_list(self, variation_string: str, for_prop_server=True):
+        """Example:
+            Takes
+                "Cj='2fF' Lj='13.5nH'"
+            for for_prop_server=True into
+                [['NAME:Cj', 'Value:=', '2fF'], ['NAME:Lj', 'Value:=', '13.5nH']]
+            or for for_prop_server=False into
+                [['Cj', '2fF'], ['Lj', '13.5nH']]
+        """
+        s = variation_string
+        s = s.split(' ')
+        s = [s1.strip().strip("''").split("='") for s1 in s]
+
+        if for_prop_server:
+            local, project = [], []
+
+            for arr in s:
+                to_add = [f'NAME:{arr[0]}', "Value:=",  arr[1]]
+                if arr[0][0] is '$':
+                    project += [to_add]  # global variable
+                else:
+                    local += [to_add]  # local variable
+
+            return local, project
+
+        else:
+            return s
+
+    def set_variables(self, variation_string: str):
+        """
+        Set all variables to match a solved variaiton string.
+
+        Args:
+            variation_string (str) :  Variaiton string such as
+                "Cj='2fF' Lj='13.5nH'"
+        """
+        assert isinstance(variation_string, str)
+
+        content = ["NAME:ChangedProps"]
+        local, project = self._variation_string_to_variable_list(
+            variation_string)
+        #print('\nlocal=', local, '\nproject=', project)
+
+        if len(project) > 0:
+            self._design.ChangeProperty(
+                ["NAME:AllTabs",
+                    ["NAME:ProjectVariableTab",
+                        ["NAME:PropServers",
+                         "ProjectVariables"
+                         ],
+                        content + project
+                     ]
+                 ])
+
+        if len(local) > 0:
+            self._design.ChangeProperty(
+                ["NAME:AllTabs",
+                    ["NAME:LocalVariableTab",
+                        ["NAME:PropServers",
+                         "LocalVariables"
+                         ],
+                        content + local
+                     ]
+                 ])
+
+    def set_variable(self, name: str, value: str, postprocessing=False):
         """Warning: THis is case sensitive,
 
         Arguments:
@@ -787,7 +859,7 @@ class HfssDesign(COMWrapper):
 class HfssSetup(HfssPropertyObject):
     prop_tab = "HfssTab"
     passes = make_int_prop("Passes")  # see EditSetup
-    nmodes = make_int_prop("Modes")
+    n_modes = make_int_prop("Modes")
     pct_refinement = make_float_prop("Percent Refinement")
     delta_f = make_float_prop("Delta F")
     min_freq = make_float_prop("Min Freq")
@@ -1053,6 +1125,9 @@ class HfssSetup(HfssPropertyObject):
 
 
 class HfssDMSetup(HfssSetup):
+    """
+    Driven modal setup
+    """
     solution_freq = make_float_prop("Solution Freq")
     delta_s = make_float_prop("Delta S")
     solver_type = make_str_prop("Solver Type")
@@ -1092,6 +1167,9 @@ class HfssDMSetup(HfssSetup):
 
 
 class HfssEMSetup(HfssSetup):
+    """
+    Eigenmode setup
+    """
     min_freq = make_float_prop("Min Freq")
     n_modes = make_int_prop("Modes")
     delta_f = make_float_prop("Delta F")
@@ -1101,6 +1179,9 @@ class HfssEMSetup(HfssSetup):
 
 
 class AnsysQ3DSetup(HfssSetup):
+    """
+    Q3D setup
+    """
     prop_tab = "CG"
     max_pass = make_int_prop("Max. Number of Passes")
     max_pass = make_int_prop("Min. Number of Passes")
@@ -1271,6 +1352,28 @@ class HfssDesignSolutions(COMWrapper):
         '''
         return self._solutions.GetValidISolutionList()
 
+    def list_variations(self, setup_name: str = None):
+        """
+        Get a list of solved variations.
+
+        Args:
+            setup_name(str) : Example name ("Setup1 : LastAdaptive") Defaults to None.
+
+        Returns:
+             An array of strings corresponding to solved variations.
+
+             .. code-block:: python
+
+                ("Cj='2fF' Lj='12nH'",
+                "Cj='2fF' Lj='12.5nH'",
+                "Cj='2fF' Lj='13nH'",
+                "Cj='2fF' Lj='13.5nH'",
+                "Cj='2fF' Lj='14nH'")
+        """
+        if setup_name is None:
+            setup_name = str(self.parent.solution_name)
+        return self._solutions.ListVariations(setup_name)
+
 
 class HfssEMDesignSolutions(HfssDesignSolutions):
 
@@ -1279,6 +1382,7 @@ class HfssEMDesignSolutions(HfssDesignSolutions):
         Returns the eigenmode data of freq and kappa/2p
         '''
         fn = tempfile.mktemp()
+        #print(self.parent.solution_name, lv, fn)
         self._solutions.ExportEigenmodes(self.parent.solution_name, lv, fn)
         data = np.genfromtxt(fn, dtype='str')
         # Update to Py 3:
@@ -1334,7 +1438,7 @@ class HfssEMDesignSolutions(HfssDesignSolutions):
     self._solutions.ExportEigenmodes(soln_name, ['Pass:=5'], fn) # ['Pass:=5'] fails  can do with ''
     """
 
-    def set_mode(self, n, phase=0):
+    def set_mode(self, n, phase=0, FieldType='EigenStoredEnergy'):
         '''
         Indicates which source excitations should be used for fields post processing.
         HFSS>Fields>Edit Sources
@@ -1344,6 +1448,8 @@ class HfssEMDesignSolutions(HfssDesignSolutions):
         Amplitude is set to 1
 
         No error is thorwn if a number exceeding number of modes is set
+
+            FieldType -- EigenStoredEnergy or EigenPeakElecticField
         '''
         n_modes = int(self.parent.n_modes)
 
@@ -1357,29 +1463,51 @@ class HfssEMDesignSolutions(HfssDesignSolutions):
             logger.error(err)
             raise Exception(err)
 
-        self._solutions.EditSources(
-            "EigenStoredEnergy",
-            ["NAME:SourceNames", "EigenMode"],
-            ["NAME:Modes", n_modes],
-            ["NAME:Magnitudes"] + [1 if i + 1 ==
-                                   n else 0 for i in range(n_modes)],
-            ["NAME:Phases"] + [phase if i + 1 ==
-                               n else 0 for i in range(n_modes)],
-            ["NAME:Terminated"],
-            ["NAME:Impedances"]
-        )
+        if self._ansys_version >= '2019':
+            # THIS WORKS FOR v2019R2
+            self._solutions.EditSources(
+                [
+                    [
+                        "FieldType:=", "EigenPeakElectricField"
+                    ],
+                    [
+                        "Name:=", "Modes",
+                        "Magnitudes:=", ["1" if i + 1 ==
+                                         n else "0" for i in range(n_modes)],
+                        "Phases:=", [str(phase) if i + 1 ==
+                                     n else "0" for i in range(n_modes)]
+                    ]
+                ])
+        else:
+            # The syntax has changed for AEDT 18.2.
+            # see https://ansyshelp.ansys.com/account/secured?returnurl=/Views/Secured/Electronics/v195//Subsystems/HFSS/Subsystems/HFSS%20Scripting/HFSS%20Scripting.htm
 
-    def has_fields(self, variation=None):
+            self._solutions.EditSources(
+                "EigenStoredEnergy",
+                ["NAME:SourceNames", "EigenMode"],
+                ["NAME:Modes", n_modes],
+                ["NAME:Magnitudes"] + [1 if i + 1 ==
+                                       n else 0 for i in range(n_modes)],
+                ["NAME:Phases"] + [phase if i + 1 ==
+                                   n else 0 for i in range(n_modes)],
+                ["NAME:Terminated"],
+                ["NAME:Impedances"]
+            )
+
+    def has_fields(self, variation_string=None):
         '''
         Determine if fields exist for a particular solution.
 
-        variation : str | None
-        If None, gets the nominal variation
+        variation_string : str | None
+            This must the string that describes the variaiton in hFSS, not 0 or 1, but
+            the string of variables, such as
+                "Cj='2fF' Lj='12.75nH'"
+            If None, gets the nominal variation
         '''
-        if variation is None:
-            variation = self.parent.parent.get_nominal_variation()
+        if variation_string is None:
+            variation_string = self.parent.parent.get_nominal_variation()
 
-        return bool(self._solutions.HasFields(self.parent.solution_name, variation))
+        return bool(self._solutions.HasFields(self.parent.solution_name, variation_string))
 
     def create_report(self, plot_name, xcomp, ycomp, params, pass_name='LastAdaptive'):
         '''
@@ -1389,7 +1517,7 @@ class HfssEMDesignSolutions(HfssDesignSolutions):
         ------------------------------------------------------
         Exammple plot for a single vareiation all pass converge of mode freq
         .. code-block python
-            ycomp = [f"re(Mode({i}))" for i in range(1,1+epr_hfss.nmodes)]
+            ycomp = [f"re(Mode({i}))" for i in range(1,1+epr_hfss.n_modes)]
             params = ["Pass:=", ["All"]]+variation
             setup.create_report("Freq. vs. pass", "Pass", ycomp, params, pass_name='AdaptivePass')
         '''
@@ -1512,6 +1640,7 @@ class HfssReport(COMWrapper):
         return np.loadtxt(fn, skiprows=1, delimiter=',').transpose()
         # warning for python 3 probably need to use genfromtxt
 
+
 class Optimetrics(COMWrapper):
     """
     Optimetrics script commands executed by the "Optimetrics" module.
@@ -1525,11 +1654,12 @@ class Optimetrics(COMWrapper):
 
     Note that running optimetrics requires the license for Optimetrics by Ansys.
     """
+
     def __init__(self, design):
         super(Optimetrics, self).__init__()
 
-        self.design=design # parent
-        self._optimetrics = self.design._optimetrics # <COMObject GetModule>
+        self.design = design  # parent
+        self._optimetrics = self.design._optimetrics  # <COMObject GetModule>
         self.setup_names = None
 
     def get_setup_names(self):
@@ -1539,7 +1669,7 @@ class Optimetrics(COMWrapper):
         self.setup_names = list(self._optimetrics.GetSetupNames())
         return self.setup_names.copy()
 
-    def solve_setup(self, setup_name:str):
+    def solve_setup(self, setup_name: str):
         """
         Solves the specified Optimetrics setup.
         Corresponds to:  Right-click the setup in the project tree, and then click
@@ -1552,6 +1682,69 @@ class Optimetrics(COMWrapper):
         Note that this requires the license for Optimetrics by Ansys.
         """
         return self._optimetrics.SolveSetup(setup_name)
+
+    def create_setup(self, variable, swp_params, name="ParametricSetup1", swp_type='linear_step',
+                     setup_name=None,
+                     save_fields=True, copy_mesh=True, solve_with_copied_mesh_only=True,
+                     setup_type='parametric'
+                     ):
+        """
+        Inserts a new parametric setup.
+
+
+        For  type_='linear_step' swp_params is start, stop, step:
+             swp_params = ("12.8nH" "13.6nH", "0.2nH")
+
+        Corresponds to ui access:
+            Right-click the Optimetrics folder in the project tree,
+            and then click Add> Parametric on the shortcut menu.
+        """
+        setup_name = setup_name or self.design.get_setup_names()[0]
+        print(
+            f"Inserting optimetrics setup `{name}` for simulation setup: `{setup_name}`")
+
+        if not setup_type is 'parametric':
+            raise NotImplementedError()
+
+        if swp_type is 'linear_step':
+            assert len(swp_params) is 3
+            # e.g., "LIN 12.8nH 13.6nH 0.2nH"
+            swp_str = f"LIN {swp_params[0]} {swp_params[1]} {swp_params[2]}"
+        else:
+            raise NotImplementedError()
+
+        self._optimetrics.InsertSetup("OptiParametric",
+                                      [
+                                          f"NAME:{name}",
+                                          "IsEnabled:="		, True,
+                                          [
+                                              "NAME:ProdOptiSetupDataV2",
+                                              "SaveFields:="		, save_fields,
+                                              "CopyMesh:="		, copy_mesh,
+                                              "SolveWithCopiedMeshOnly:=", solve_with_copied_mesh_only,
+                                          ],
+                                          [
+                                              "NAME:StartingPoint"
+                                          ],
+                                          "Sim. Setups:="		, [setup_name],
+                                          [
+                                              "NAME:Sweeps",
+                                              [
+                                                  "NAME:SweepDefinition",
+                                                  "Variable:="		, variable,
+                                                  "Data:="		, swp_str,
+                                                  "OffsetF1:="		, False,
+                                                  "Synchronize:="		, 0
+                                              ]
+                                          ],
+                                          [
+                                              "NAME:Sweep Operations"
+                                          ],
+                                          [
+                                              "NAME:Goals"
+                                          ]
+                                      ])
+
 
 class HfssModeler(COMWrapper):
     def __init__(self, design, modeler, boundaries, mesh):
@@ -2609,18 +2802,19 @@ def get_active_design():
     return project.get_active_design()
 
 
-def get_report_arrays(name):
+def get_report_arrays(name: str):
     d = get_active_design()
     r = HfssReport(d, name)
     return r.get_arrays()
 
 
-def load_ansys_project(proj_name, project_path=None, extension='.aedt'):
+def load_ansys_project(proj_name: str, project_path: str = None, extension: str = '.aedt'):
     '''
-    proj_name : None  --> get active.
-    (make sure 2 run as admin)
+    Utility function to load an Ansys project.
 
-    extension : `aedt` is for 2016 version and newer
+    Args:
+        proj_name : None  --> get active. (make sure 2 run as admin)
+        extension : `aedt` is for 2016 version and newer
     '''
     if project_path:
         # convert slashes correctly for system
@@ -2640,7 +2834,8 @@ def load_ansys_project(proj_name, project_path=None, extension='.aedt'):
                      Please check your filename.\n%s\n" % project_path)
 
         if (project_path/'.lock').is_file():
-            logger.warning('\t\tFile is locked. \N{fearful face} If connection fails, delete the .lock file.')
+            logger.warning(
+                '\t\tFile is locked. \N{fearful face} If connection fails, delete the .lock file.')
 
     app = HfssApp()
     logger.info("\tOpened Ansys App")

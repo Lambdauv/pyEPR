@@ -15,6 +15,12 @@ Welcome to pyEPR :beers:!
 * Z.K. Minev, Ph.D. Dissertation, Yale University (2018), see Chapter 4. [arXiv:1902.10355](https://arxiv.org/abs/1902.10355)
 * Z.K. Minev, Z. Leghtas, _et al._ (to appear soon on arXiv) (2019)
 
+### Documentation
+
+[Read the docs here.](https://pyepr-docs.readthedocs.io)
+
+#### Legacy users
+Warning: pyEPR organization was significnatly improved in v0.8-dev (starting 2020; current branch: master \[to be made stable soon\]). If you used a previous version, you will find that all key classes have been renamed. Please, see the tutorials and docs.  In the meantime, if you cannot switch yet, revert to use the stable v0.7.
 
 # Contents:
 * [Start here: Using `pyEPR`](#start-here-using-pyepr)
@@ -47,13 +53,14 @@ The following code illustrates how to perform a complete analysis of a simple tw
 import pyEPR as epr
 
 # 1. Connect to your Ansys, and load your design
-pinfo = epr.Project_Info(project_path = r'C:\sim_folder',
-                         project_name = r'cavity_with_two_qubits',
-                         design_name  = r'Alice_Bob')
+pinfo = epr.ProjectInfo(project_path = r'C:\sim_folder',
+                        project_name = r'cavity_with_two_qubits',
+                        design_name  = r'Alice_Bob')
 
-# 2. Non-linear (Josephson) junctions: specify
-pinfo.junctions['jAlice'] = {'Lj_variable':'LJAlice', 'rect':'qubitAlice', 'line': 'alice_line', 'length':parse_units('50um')}
-pinfo.junctions['jBob']   = {'Lj_variable':'LJBob',   'rect':'qubitBob',   'line': 'bob_line',   'length':parse_units('50um')}
+
+# 2a. Non-linear (Josephson) junctions
+pinfo.junctions['jAlice'] = {'Lj_variable':'Lj_alice', 'rect':'rect_alice', 'line': 'line_alice', 'Cj_variable':'Cj_alice'}
+pinfo.junctions['jBob']   = {'Lj_variable':'Lj_bob',   'rect':'rect_bob',   'line': 'line_bob', 'Cj_variable':'Cj_bob'}
 pinfo.validate_junction_info() # Check that valid names of variables and objects have been supplied.
 
 # 2b. Dissipative elements: specify
@@ -61,13 +68,21 @@ pinfo.dissipative.dielectrics_bulk    = ['si_substrate', 'dielectic_object2'] # 
 pinfo.dissipative.dielectric_surfaces = ['interface1', 'interface2']
 
 # 3.  Perform microwave analysis on eigenmode solutions
-eprh = epr.pyEPR_HFSSAnalysis(pinfo)
-eprh.do_EPR_analysis()
+eprd = epr.DistributedAnalysis(pinfo)
+if 1: # automatic reports
+  eprd.quick_plot_frequencies(swp_var) # plot the solved frequencies before the analysis
+  eprd.hfss_report_full_convergence() # report convergen
+eprd.do_EPR_analysis()
 
-# 4.  Perform Hamiltonian spectrum post-analysis, building on mw solutions using EPR
-epra = epr.pyEPR_Analysis(eprh.data_filename)
+# 4a.  Perform Hamiltonian spectrum post-analysis, building on mw solutions using EPR
+epra = epr.QuantumAnalysis(eprd.data_filename)
 epra.analyze_all_variations(cos_trunc = 8, fock_trunc = 7)
-epra.plot_Hresults()
+
+# 4b. Report solved results
+swp_variable = 'Lj_alice' # suppose we swept an optimetric analysis vs. inductance Lj_alice
+epra.plot_hamiltonian_results(swp_variable=swp_variable)
+epra.report_results(swp_variable=swp_variable, numeric=True)
+epra.quick_plot_mode(0,0,1,numeric=True, swp_variable=swp_variable)
 ```
 
 # `pyEPR` Video Tutorials <img src="https://developers.google.com/site-assets/logo-youtube.svg" height=30>

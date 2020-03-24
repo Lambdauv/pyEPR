@@ -108,3 +108,7 @@ pyEPR/.pylintrc
 *.lock
 *.aedtresults/*
 *.aedtresults*
+pyEPR/core.py.rej
+pyEPR/core.py.rej
+pyEPR/core.py.rej
+.vscode/
