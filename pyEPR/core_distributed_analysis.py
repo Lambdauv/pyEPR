@@ -212,7 +212,7 @@ class DistributedAnalysis(object):
         """ Project info options"""
         return self.pinfo.options
 
-    def setup_data(self):
+    def setup_data(self, root_dir=None):
         '''
         Set up folder paths for saving data to.
 
@@ -224,7 +224,10 @@ class DistributedAnalysis(object):
         if len(self.design.name) > 50:
             logger.error('WARNING!   DESIGN FILENAME MAY BE TOO LONG! ')
 
-        self.data_dir = Path(config.root_dir) / \
+
+        root_dir = Path(root_dir) or Path(config.root_dir)
+
+        self.data_dir = root_dir / \
             self.project.name / self.design.name
         self.data_filename = self.data_dir / (time.strftime(config.save_format,
                                                             time.localtime()) + '.npz')
